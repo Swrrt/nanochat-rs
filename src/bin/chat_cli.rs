@@ -39,6 +39,29 @@ struct Args {
     seed: u64,
 }
 
+#[derive(Debug)]
+enum ModelSource {
+    HuggingFace(String),
+    Local(PathBuf),
+}
+
+fn parse_source(raw: &str) -> Result<ModelSource> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        bail!("--source must not be empty");
+    }
+
+    if let Some(repo) = trimmed.strip_prefix("hf:") {
+        let repo_id = repo.trim();
+        if repo_id.is_empty() {
+            bail!("HuggingFace source must use the form 'hf:<repo_id>'");
+        }
+        Ok(ModelSource::HuggingFace(repo_id.to_owned()))
+    } else {
+        Ok(ModelSource::Local(PathBuf::from(trimmed)))
+    }
+}
+
 fn init_tracing() {
     // Respect RUST_LOG when set, otherwise default to info for concise output.
     let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
@@ -52,12 +75,10 @@ fn main() -> Result<()> {
     init_tracing();
 
     let args = Args::parse();
-
-    let dir = if args.source.starts_with("hf:") {
-        hf::clone(args.source.split(':').nth(1).unwrap())?
-    } else {
-        // local directory
-        PathBuf::from(args.source)
+    let source = parse_source(&args.source)?;
+    let dir = match source {
+        ModelSource::HuggingFace(repo_id) => hf::clone(&repo_id)?,
+        ModelSource::Local(path) => path,
     };
 
     let files = ModelFiles::new_from_dir(&dir)?;

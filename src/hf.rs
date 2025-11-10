@@ -8,18 +8,25 @@ pub fn clone(repo_id: &str) -> Result<std::path::PathBuf> {
     let repo = Api::new()?.model(repo_id.to_string());
     let info = repo.info()?;
     debug!("cloning model from HuggingFace: {:?}", info);
-    let mut repo_root: Option<PathBuf> = None;
+    let mut repo_root: Option<(PathBuf, usize)> = None;
     for file in info.siblings {
         // Downloads to local HF cache (or returns cached path)
         let path = repo.get(&file.rfilename)?;
-        let parent = path.parent().unwrap();
-        if repo_root.is_none()
-            || repo_root.as_ref().unwrap().to_str().unwrap().len() > parent.to_str().unwrap().len()
-        {
-            repo_root = Some(parent.to_path_buf()); // assume the repo is a single directory
+        if let Some(parent) = path.parent() {
+            // Prefer the shallowest directory, assuming the repo contents live under one root.
+            let depth = parent.components().count();
+            let should_update = repo_root
+                .as_ref()
+                .map(|(_, current_depth)| depth < *current_depth)
+                .unwrap_or(true);
+            if should_update {
+                repo_root = Some((parent.to_path_buf(), depth));
+            }
         }
     }
-    repo_root.ok_or_else(|| anyhow::anyhow!("No files found in HuggingFace repository"))
+    repo_root
+        .map(|(path, _)| path)
+        .ok_or_else(|| anyhow::anyhow!("No files found in HuggingFace repository"))
 }
 
 pub fn download(repo_id: &str, filename: &str) -> Result<std::path::PathBuf> {
