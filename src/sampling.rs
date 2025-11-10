@@ -3,6 +3,7 @@ use candle_core::{DType, Device, Tensor, D};
 use candle_nn::ops::softmax_last_dim;
 use rand::Rng;
 use rand_distr::{weighted::WeightedIndex, Distribution};
+use tracing::debug;
 
 ///
 /// - temperature == 0.0 -> greedy argmax over last dim
@@ -32,12 +33,11 @@ pub fn sample_next_token<R: Rng + ?Sized>(
     let k_eff = top_k.filter(|&k| k > 0 && k < vocab).unwrap_or(vocab);
 
     if k_eff < vocab {
-        // Sort descending to get per-row top-k values and indices
-        let (values_sorted, indices_sorted) = logits.sort_last_dim(false)?;
-
-        let topk_vals = values_sorted.narrow(D::Minus1, 0, k_eff)?;
-        let topk_idx = indices_sorted.narrow(D::Minus1, 0, k_eff)?;
-
+        // Avoid Metal argsort for indices: compute indices on CPU, gather values on GPU.
+        let dev = logits.device();
+        let idx_cpu = logits.to_device(&Device::Cpu)?.arg_sort_last_dim(false)?; // descending
+        let topk_idx = idx_cpu.narrow(D::Minus1, 0, k_eff)?.to_device(dev)?;
+        let topk_vals = logits.gather(&topk_idx, D::Minus1)?;
         // Temperature-scale then softmax only over top-k
         let probs = softmax_last_dim(&(&topk_vals / temperature)?)?;
 
@@ -62,7 +62,9 @@ fn sample_from_probs<R: Rng + ?Sized>(
 ) -> Result<Tensor> {
     let (b_sz, _n) = probs.dims2()?;
     // Ensure host conversion expects F32 irrespective of model dtype (e.g., BF16)
-    let probs_f32 = probs.to_dtype(DType::F32)?;
+    let probs_f32 = probs
+        .to_dtype(DType::F32)
+        .and_then(|t| t.to_device(&Device::Cpu))?;
     let probs_rows = probs_f32.to_vec2::<f32>()?;
 
     let sampled_indices: Result<Vec<u32>> = if let Some(mapping) = index_mapping {
@@ -90,12 +92,14 @@ fn sample_from_probs<R: Rng + ?Sized>(
             .collect()
     };
 
-    let indices = Tensor::from_vec(sampled_indices?, b_sz, probs.device())?;
+    let indices = Tensor::from_vec(sampled_indices?, b_sz, &Device::Cpu)?;
     Ok(indices.unsqueeze(D::Minus1)?)
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::model::builder::pick_device;
+
     use super::*;
     use anyhow::Result as AnyResult;
     use candle_core::Device;
@@ -122,7 +126,8 @@ mod tests {
 
     #[test]
     fn test_topk_restricts_choices() -> AnyResult<()> {
-        let device = Device::Cpu;
+        let device = pick_device(0)?;
+        println!("device: {:?}", device);
         let logits = Tensor::from_vec(vec![0.0f32, -1.0, 10.0, 9.0, -10.0], (1, 5), &device)?;
 
         for seed in 0..50u64 {

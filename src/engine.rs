@@ -95,7 +95,8 @@ impl Generator {
         if num_samples == 0 {
             bail!("num_samples must be > 0");
         }
-        let ctx_limit = model.config().sequence_len;
+        // smaller initial context limit to reduce memory usage
+        let ctx_limit = model.config().sequence_len / 4;
 
         // Initialize sequences
         let mut sequences: Vec<RowState> = vec![RowState::new(prefill.to_vec()); num_samples];
