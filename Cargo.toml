@@ -16,10 +16,15 @@ serde_json = "1.0"
 anyhow = "1.0"
 clap = { version = "4.0", features = ["derive"] }
 tracing = "0.1"
-tracing-subscriber = "0.3"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 candle-core = { version = "0.9" }
 candle-nn = { version = "0.9" }
+
+# Use Metal dependencies for Apple platforms
+[target.'cfg(target_os = "macos")'.dependencies]
+candle-core = { version = "0.9", features = ["metal"] }
+candle-nn = { version = "0.9", features = ["metal"] }
 
 rand = { version = "0.9" }
 rand_distr = { version = "0.5" }

@@ -51,7 +51,7 @@ impl SamplingParams {
 
 impl Default for SamplingParams {
     fn default() -> Self {
-        Self::new(0.0, None, None, Default::default())
+        Self::new(0.0, Some(50), Some(42), Default::default())
     }
 }
 

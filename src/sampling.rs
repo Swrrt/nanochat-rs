@@ -15,7 +15,7 @@ pub fn sample_next_token<R: Rng + ?Sized>(
     logits: &Tensor,
     rng: &mut R,
     temperature: f64,
-    top_k_opt: Option<usize>,
+    top_k: Option<usize>,
 ) -> Result<Tensor> {
     if temperature < 0.0 {
         anyhow::bail!("temperature must be non-negative");
@@ -29,13 +29,16 @@ pub fn sample_next_token<R: Rng + ?Sized>(
 
     // Determine effective k; None or 0 -> full vocab. k >= vocab -> full vocab.
     let vocab = logits.dim(D::Minus1)?;
-    let k_eff = top_k_opt.filter(|&k| k > 0 && k < vocab).unwrap_or(vocab);
+    let k_eff = top_k.filter(|&k| k > 0 && k < vocab).unwrap_or(vocab);
 
     if k_eff < vocab {
         // Sort descending to get per-row top-k values and indices
         let (values_sorted, indices_sorted) = logits.sort_last_dim(false)?;
         let topk_vals = values_sorted.narrow(D::Minus1, 0, k_eff)?;
-        let topk_idx = indices_sorted.narrow(D::Minus1, 0, k_eff)?;
+        // Ensure index dtype matches host extraction type
+        let topk_idx = indices_sorted
+            .narrow(D::Minus1, 0, k_eff)?
+            .to_dtype(DType::U32)?;
 
         // Temperature-scale then softmax only over top-k
         let probs = softmax_last_dim(&(&topk_vals / temperature)?)?;
