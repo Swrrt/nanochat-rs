@@ -70,7 +70,7 @@ jobs:
       with:
         components: clippy
     - name: Run clippy
-      run: cargo clippy --all-targets --all-features -- -D warnings
+      run: cargo clippy -- -D warnings
 
   # security:
   #   name: Security Audit

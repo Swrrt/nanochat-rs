@@ -8,6 +8,7 @@ use nanochat_rs::engine::{Engine, SamplingParams};
 use nanochat_rs::hf;
 use nanochat_rs::model::builder::load_model_from_files;
 use nanochat_rs::tokenizer::special_tokens;
+use tracing_subscriber::EnvFilter;
 
 #[derive(Parser, Debug)]
 #[command(name = "chat_cli", about = "NanoChat interactive CLI (Rust)")]
@@ -38,7 +39,19 @@ struct Args {
     seed: u64,
 }
 
+fn init_tracing() {
+    // Respect RUST_LOG when set, otherwise default to info for concise output.
+    let env_filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(env_filter)
+        .with_target(false)
+        .try_init();
+}
+
 fn main() -> Result<()> {
+    init_tracing();
+
     let args = Args::parse();
 
     let dir = if args.source.starts_with("hf:") {
