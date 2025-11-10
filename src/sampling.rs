@@ -1,9 +1,7 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use candle_core::{DType, Device, Tensor, D};
 use candle_nn::ops::softmax_last_dim;
 use rand::Rng;
-use rand_distr::{weighted::WeightedIndex, Distribution};
-use tracing::debug;
 
 ///
 /// - temperature == 0.0 -> greedy argmax over last dim
@@ -60,40 +58,37 @@ fn sample_from_probs<R: Rng + ?Sized>(
     index_mapping: Option<&Tensor>,
     rng: &mut R,
 ) -> Result<Tensor> {
-    let (b_sz, _n) = probs.dims2()?;
-    // Ensure host conversion expects F32 irrespective of model dtype (e.g., BF16)
-    let probs_f32 = probs
-        .to_dtype(DType::F32)
-        .and_then(|t| t.to_device(&Device::Cpu))?;
-    let probs_rows = probs_f32.to_vec2::<f32>()?;
+    let (batch, vocab) = probs.dims2()?;
+    let probs = probs.to_dtype(DType::F32)?;
+    let cdf = probs.cumsum(D::Minus1)?;
 
-    let sampled_indices: Result<Vec<u32>> = if let Some(mapping) = index_mapping {
-        let mapping_rows = mapping
-            .to_device(&Device::Cpu)
-            .and_then(|t| t.to_vec2::<u32>())
-            .context("Failed to convert index mapping to vec2<u32>")?;
-        probs_rows
-            .iter()
-            .zip(mapping_rows.iter())
-            .map(|(prob_row, map_row)| {
-                let dist = WeightedIndex::new(prob_row).map_err(|e| anyhow::anyhow!(e))?;
-                let idx = dist.sample(rng);
-                Ok(map_row[idx])
-            })
-            .collect()
+    // Sample uniforms on CPU (cheap) and upload a single tensor per batch step.
+    let mut uniforms = Vec::with_capacity(batch);
+    for _ in 0..batch {
+        uniforms.push(rng.random::<f32>().clamp(0.0, 1.0 - f32::EPSILON));
+    }
+    let uniforms = Tensor::from_vec(uniforms, (batch, 1), probs.device())?;
+    let uniforms = uniforms.broadcast_as(cdf.shape())?;
+
+    // Identify the earliest index where CDF >= uniform by giving earlier hits higher scores.
+    let mask = cdf.ge(&uniforms)?.to_dtype(DType::F32)?;
+    let positions = Tensor::arange(0u32, vocab as u32, probs.device())?
+        .to_dtype(DType::F32)?
+        .reshape((1, vocab))?
+        .broadcast_as(cdf.shape())?;
+    let max_rank = Tensor::full(vocab as f32, positions.dims(), probs.device())?;
+    let scores = mask.broadcast_mul(&max_rank.broadcast_sub(&positions)?)?;
+
+    let sampled = scores
+        .argmax(D::Minus1)?
+        .to_dtype(DType::U32)?
+        .unsqueeze(D::Minus1)?;
+
+    if let Some(mapping) = index_mapping {
+        Ok(mapping.gather(&sampled, D::Minus1)?)
     } else {
-        probs_rows
-            .iter()
-            .map(|prob_row| {
-                let dist = WeightedIndex::new(prob_row).map_err(|e| anyhow::anyhow!(e))?;
-                let idx = dist.sample(rng);
-                Ok(idx as u32)
-            })
-            .collect()
-    };
-
-    let indices = Tensor::from_vec(sampled_indices?, b_sz, &Device::Cpu)?;
-    Ok(indices.unsqueeze(D::Minus1)?)
+        Ok(sampled)
+    }
 }
 
 #[cfg(test)]
