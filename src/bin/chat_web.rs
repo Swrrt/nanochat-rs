@@ -104,7 +104,6 @@ impl UiAssets {
         let html = locate_text_asset(
             ui_path,
             &[
-                "reference/ui.html",
                 "nanochat/ui.html",
                 "reference/nanochat/ui.html",
                 "reference/nanochat/nanochat/ui.html",
@@ -113,7 +112,6 @@ impl UiAssets {
         let logo = locate_binary_asset(
             logo_path,
             &[
-                "reference/logo.svg",
                 "nanochat/logo.svg",
                 "reference/nanochat/logo.svg",
                 "reference/nanochat/nanochat/logo.svg",
