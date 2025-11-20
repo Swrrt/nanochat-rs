@@ -17,6 +17,10 @@ anyhow = "1.0"
 clap = { version = "4.0", features = ["derive"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+axum = { version = "0.7", features = ["macros", "json"] }
+tower-http = { version = "0.5", features = ["cors", "trace"] }
+tokio = { version = "1.40", features = ["rt-multi-thread", "macros", "signal"] }
+tokio-stream = "0.1"
 
 candle-core = { version = "0.9" }
 candle-nn = { version = "0.9" }
